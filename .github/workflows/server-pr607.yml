@@ -1,0 +1,57 @@
+name: Build server 3.39.1 with PR 607
+
+on:
+  push:
+    branches: [build/cpr-3.39.1-pr607]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: daf2081d8445c6ffb7877cac0788e3b8338b5299
+          persist-credentials: false
+      - uses: ./.github/actions/build-frontend
+        with:
+          upload-artifact: 'true'
+  backend:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: daf2081d8445c6ffb7877cac0788e3b8338b5299
+          persist-credentials: false
+      - name: Validate and build Linux x86_64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/server
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/workspace" -w /workspace \
+            -e RUST_MIN_STACK=16777216 -e CARGO_BUILD_JOBS=3 \
+            -e CPR_VERSION=3.39.1+pr607 \
+            -e CPR_GIT_SHA=daf2081d8445c6ffb7877cac0788e3b8338b5299 \
+            -e CPR_BUILD_TYPE=source \
+            -e CPR_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            rust:1.99.1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b \
+            bash -c 'set -euo pipefail
+              rustup component add rustfmt
+              cargo fmt --all --manifest-path backend/Cargo.toml -- --check
+              cargo test --release --manifest-path backend/Cargo.toml -p gateway-api --test main admin::proxies --locked
+              cargo build --release --manifest-path backend/Cargo.toml --bin codex-proxy-rs --locked
+              cp backend/target/release/codex-proxy-rs dist/server/codex-proxy-rs
+              dist/server/codex-proxy-rs --version
+              cd dist/server
+              sha256sum codex-proxy-rs > checksums.txt'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: cpr-3.39.1-pr607-linux-amd64
+          path: dist/server
+          if-no-files-found: error
+          retention-days: 3
