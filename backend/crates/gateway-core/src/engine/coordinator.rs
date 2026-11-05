@@ -375,6 +375,7 @@ where
             request_profiles: BTreeMap::new(),
             current: None,
             send_state_watermark: UpstreamSendState::NotSent,
+            attempt_history_replay_safe: true,
             delivery_committed: false,
             replay_barrier_reached: false,
             client_status_code: None,
@@ -542,6 +543,8 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     current: Option<CurrentAttempt>,
     /// 请求级发送状态水位；跨 attempt 单调不降，终态写回不得低于此档
     send_state_watermark: UpstreamSendState,
+    /// 历次失败均未发送或明确可安全重放；结果不明的传输恢复不能重新获得直连资格
+    attempt_history_replay_safe: bool,
     response_commit: super::execution::ResponseCommit,
     // 传输心跳可先于首个业务批次提交，两者不能共用重放屏障
     delivery_committed: bool,
@@ -1658,6 +1661,8 @@ where
         }
         let execution_effect_observed = self.execution_effect_observed();
         let send_state = self.raise_send_watermark(attempt_send_state);
+        self.attempt_history_replay_safe &= attempt_send_state == UpstreamSendState::NotSent
+            || (attempt_send_state != UpstreamSendState::Ambiguous && error.replay_is_safe());
         let provider_proved_replay_safe = provider_proved_replay_safe(&error);
         let continuation_retry = !execution_effect_observed
             && self.prepare_continuation_retry(
@@ -1694,7 +1699,7 @@ where
                     && !self.replay_barrier_reached
                     && !self.delivery_pending
                     && attempt_send_state == UpstreamSendState::NotSent
-                    && self.current_send_state() == UpstreamSendState::NotSent
+                    && self.attempt_history_replay_safe
                     && self.continuation_attempt == ContinuationAttempt::None
                     && !self
                         .direct_fallback_accounts
@@ -1866,6 +1871,7 @@ where
             "ordinaryRetry": ordinary_retry, "transportRecovery": transport_recovery.is_some(),
             "connectionRotation": connection_rotation.is_some(),
             "directFallback": direct_fallback.is_some(),
+            "attemptHistoryReplaySafe": self.attempt_history_replay_safe,
             "reserveConnectionRotation": reserve_connection_rotation,
             "transientRetry": transient_retry.is_some(),
             "retryAfterExceeded": retry_after_exceeds_limit,
