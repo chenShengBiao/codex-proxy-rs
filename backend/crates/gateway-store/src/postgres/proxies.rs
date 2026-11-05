@@ -138,6 +138,10 @@ fn record(row: PgRow) -> StoreResult<ProxyRecord> {
                     .map_err(|source| invalid().with_source(source))?,
             )
             .map_err(|source| invalid().with_source(source))?,
+        )
+        .with_allow_direct_fallback(
+            row.try_get("allow_direct_fallback")
+                .map_err(|source| invalid().with_source(source))?,
         ),
         revision: AdminRevision::new(
             u64::try_from(
@@ -355,8 +359,8 @@ pub(crate) async fn resolve_proxy_selection(
             Ok((Some(id), Some(proxy.clone())))
         }
         AccountProxySelection::Saved(id) => {
-            let (value, enabled, limit): (String, bool, i64) = sqlx::query_as(
-                "select proxy_url, enabled, max_websocket_connections from outbound_proxies where id = $1 for share",
+            let (value, enabled, limit, allow_direct_fallback): (String, bool, i64, bool) = sqlx::query_as(
+                "select proxy_url, enabled, max_websocket_connections, allow_direct_fallback from outbound_proxies where id = $1 for share",
             )
             .bind(id)
             .fetch_optional(&mut **transaction)
@@ -377,7 +381,8 @@ pub(crate) async fn resolve_proxy_selection(
                         .map_err(|source| invalid().with_source(source))?
                         .with_max_websocket_connections(
                             u32::try_from(limit).map_err(|source| invalid().with_source(source))?,
-                        ),
+                        )
+                        .with_allow_direct_fallback(allow_direct_fallback),
                 ),
             ))
         }
@@ -688,10 +693,11 @@ impl ProxyStore for PgProxyRepository {
         save_location(&mut transaction, &id, command.location.as_ref())
             .await
             .map_err(store_error)?;
-        sqlx::query("update outbound_proxies set auto_location = $2, max_websocket_connections = $3 where id = $1")
+        sqlx::query("update outbound_proxies set auto_location = $2, max_websocket_connections = $3, allow_direct_fallback = $4 where id = $1")
             .bind(&id)
             .bind(command.auto_location)
             .bind(i64::from(command.proxy.max_websocket_connections()))
+            .bind(command.proxy.allow_direct_fallback())
             .execute(&mut *transaction)
             .await
             .map_err(|source| store_error(unavailable(source)))?;
@@ -714,6 +720,7 @@ impl ProxyStore for PgProxyRepository {
                 "location",
                 "auto_location",
                 "max_websocket_connections",
+                "allow_direct_fallback",
             ],
             revision,
         )
@@ -766,6 +773,7 @@ impl ProxyStore for PgProxyRepository {
         let changed = sqlx::query(
             "update outbound_proxies set name = $3, proxy_url = coalesce($4, proxy_url), revision = revision + 1, updated_at = now(),
              auto_location = coalesce($5, auto_location), enabled = coalesce($6, enabled), max_websocket_connections = coalesce($7, max_websocket_connections),
+             allow_direct_fallback = coalesce($8, allow_direct_fallback),
              detected_location_json = case when ($4 is not null and $4 <> proxy_url) or ($5 is not null and $5 <> auto_location) then null else detected_location_json end,
              last_location_detection_json = case when ($4 is not null and $4 <> proxy_url) or ($5 is not null and $5 <> auto_location) then '{\"status\":\"notRequested\"}'::jsonb else last_location_detection_json end,
              last_test_at = case when $4 is not null and $4 <> proxy_url then null else last_test_at end,
@@ -779,6 +787,7 @@ impl ProxyStore for PgProxyRepository {
             .bind(&command.id).bind(i64::try_from(command.revision.get()).map_err(|_| store_error(invalid()))?)
             .bind(&command.name).bind(command.proxy.as_ref().map(OutboundProxy::expose_url)).bind(command.auto_location)
             .bind(command.enabled).bind(command.max_websocket_connections.map(i64::from))
+            .bind(command.allow_direct_fallback)
             .execute(&mut *transaction).await.map_err(|source| store_error(unavailable(source)))?;
         if changed.rows_affected() != 1 {
             // 返回版本冲突前释放事务锁，避免误挡紧接着的导入预留
@@ -815,6 +824,7 @@ impl ProxyStore for PgProxyRepository {
                 "auto_location",
                 "enabled",
                 "max_websocket_connections",
+                "allow_direct_fallback",
             ],
             revision,
         )

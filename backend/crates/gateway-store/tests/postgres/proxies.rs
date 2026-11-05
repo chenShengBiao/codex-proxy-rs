@@ -3,7 +3,7 @@
 use gateway_admin::{
     model::{
         MutationActor, MutationContext, PageSize,
-        accounts::{BatchUpdateAccounts, UpdateAccount},
+        accounts::{AccountListQuery, BatchUpdateAccounts, UpdateAccount},
         proxies::*,
     },
     ports::{
@@ -68,6 +68,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
     saved = proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 auto_location: None,
@@ -89,6 +90,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
     saved = proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 auto_location: None,
@@ -119,6 +121,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
         proxies
             .update(
                 UpdateProxy {
+                    allow_direct_fallback: None,
                     max_websocket_connections: None,
                     enabled: None,
                     auto_location: None,
@@ -138,6 +141,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
     proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 auto_location: None,
@@ -204,7 +208,9 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
                 test: None,
                 location: Some(location.clone()),
                 name: "启停测试".to_owned(),
-                proxy: OutboundProxy::parse("http://user:secret@127.0.0.1:18080").unwrap(),
+                proxy: OutboundProxy::parse("http://user:secret@127.0.0.1:18080")
+                    .unwrap()
+                    .with_allow_direct_fallback(true),
             },
             &context(),
         )
@@ -238,6 +244,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
         saved = proxies
             .update(
                 UpdateProxy {
+                    allow_direct_fallback: None,
                     max_websocket_connections: None,
                     enabled: Some(enabled),
                     auto_location: None,
@@ -263,6 +270,38 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
                 .await
                 .unwrap();
         assert_eq!(current, original);
+        let page = admin
+            .list_accounts(
+                AccountListQuery {
+                    page: 1,
+                    page_size: PageSize::new(20).unwrap(),
+                    provider_kind: None,
+                    group_filter: None,
+                    search: None,
+                    status: None,
+                    sort: None,
+                },
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(
+            page.items
+                .iter()
+                .all(
+                    |item| item.account.outbound_proxy.as_ref() == Some(&saved.proxy)
+                        && item.account.effective_outbound_proxy()
+                            == enabled.then_some(&saved.proxy)
+                )
+        );
+        let plugin_accounts = accounts.list_plugin_accounts(None, None, 10).await.unwrap();
+        assert_eq!(plugin_accounts.len(), 2);
+        assert!(
+            plugin_accounts
+                .iter()
+                .all(|account| account.outbound_proxy.as_ref() == Some(&saved.proxy))
+        );
         let mut projected = accounts.list_accounts().await.unwrap();
         for (id, provider) in [
             ("acct_enabled_openai", "openai"),
@@ -314,6 +353,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
             proxies
                 .update(
                     UpdateProxy {
+                        allow_direct_fallback: None,
                         max_websocket_connections: None,
                         enabled: Some(!enabled),
                         auto_location: None,
@@ -785,6 +825,7 @@ async fn stale_proxy_mutations_release_locks_before_next_update() {
             .unwrap();
         let stale_writer = PgProxyRepository::new(rejected_pool.clone());
         let command = |revision| UpdateProxy {
+            allow_direct_fallback: None,
             max_websocket_connections: None,
             enabled: None,
             id: saved.id.clone(),
@@ -864,6 +905,7 @@ async fn import_reservation_blocks_proxy_mutations_until_rotated_credentials_are
         .unwrap();
     let reservation = store.reserve_import(&saved.id).await.unwrap();
     let replacement = UpdateProxy {
+        allow_direct_fallback: None,
         max_websocket_connections: None,
         enabled: None,
         auto_location: None,
@@ -963,7 +1005,9 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
     let store = PgProxyRepository::new(database.pool.clone());
     let admin = admin_account_store(&database.pool);
     let context = context();
-    let old_proxy = OutboundProxy::parse("http://user:secret@127.0.0.1:8080").unwrap();
+    let old_proxy = OutboundProxy::parse("http://user:secret@127.0.0.1:8080")
+        .unwrap()
+        .with_allow_direct_fallback(true);
     let created = store
         .create(
             NewProxy {
@@ -1046,6 +1090,7 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
     let renamed = store
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 auto_location: None,
@@ -1068,6 +1113,7 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
     let edited = store
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 auto_location: None,
@@ -1085,6 +1131,7 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
         .record;
     assert!(edited.last_test.is_none());
     assert!(edited.last_test_at.is_none());
+    assert!(edited.proxy.allow_direct_fallback());
     assert!(
         read()
             .await
@@ -1334,6 +1381,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
     saved = proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 id: saved.id.clone(),
@@ -1354,6 +1402,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
     saved = proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 id: saved.id.clone(),
@@ -1382,6 +1431,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
     saved = proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 id: saved.id.clone(),
@@ -1411,7 +1461,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
 }
 
 #[tokio::test]
-async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_without_rebinding() {
+async fn proxy_execution_settings_are_shared_and_update_without_rebinding_or_credential_changes() {
     use gateway_core::account::ProviderAccountStore;
     let Some(database) = TestDatabase::create("proxy_ws_capacity").await else {
         return;
@@ -1427,7 +1477,8 @@ async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_withou
                 name: "Limited".to_owned(),
                 proxy: OutboundProxy::parse("http://127.0.0.1:18080")
                     .unwrap()
-                    .with_max_websocket_connections(24),
+                    .with_max_websocket_connections(24)
+                    .with_allow_direct_fallback(true),
             },
             &context(),
         )
@@ -1435,6 +1486,11 @@ async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_withou
         .unwrap()
         .record;
     assert_eq!(saved.proxy.max_websocket_connections(), 24);
+    assert!(saved.proxy.allow_direct_fallback());
+    proxies
+        .record_test(&saved.id, saved.revision, success(), &context())
+        .await
+        .unwrap();
     for id in ["acct_proxy_budget_a", "acct_proxy_budget_b"] {
         let mut input = account(id, id);
         input.outbound_proxy = Some(saved.proxy.clone());
@@ -1443,10 +1499,22 @@ async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_withou
     let mut direct = account("acct_other_proxy", "Other");
     direct.outbound_proxy = Some(OutboundProxy::parse("http://127.0.0.1:18081").unwrap());
     accounts.insert_provider_account(direct).await.unwrap();
-    for (change, expected) in [(None, 24), (Some(8), 8), (Some(0), 0)] {
+    let original: Vec<serde_json::Value> =
+        sqlx::query_scalar("select to_jsonb(a) from provider_accounts a order by id")
+            .fetch_all(&database.pool)
+            .await
+            .unwrap();
+    for (change, fallback, expected, expected_fallback) in [
+        (None, None, 24, true),
+        (Some(8), Some(false), 8, false),
+        (None, None, 8, false),
+        (Some(0), Some(true), 0, true),
+    ] {
+        let previous_revision = saved.revision;
         saved = proxies
             .update(
                 UpdateProxy {
+                    allow_direct_fallback: fallback,
                     max_websocket_connections: change,
                     enabled: None,
                     auto_location: None,
@@ -1463,12 +1531,25 @@ async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_withou
             .unwrap()
             .record;
         assert_eq!(saved.proxy.max_websocket_connections(), expected);
+        assert_eq!(saved.proxy.allow_direct_fallback(), expected_fallback);
+        assert!(saved.revision > previous_revision);
+        assert_eq!(saved.last_test, Some(success()));
+        let current: Vec<serde_json::Value> =
+            sqlx::query_scalar("select to_jsonb(a) from provider_accounts a order by id")
+                .fetch_all(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(current, original);
         for id in ["acct_proxy_budget_a", "acct_proxy_budget_b"] {
             let projected = accounts
                 .get_account(&ProviderAccountId::new(id).unwrap())
                 .await
                 .unwrap()
                 .unwrap();
+            assert_eq!(
+                projected.outbound_proxy().unwrap().allow_direct_fallback(),
+                expected_fallback
+            );
             assert_eq!(
                 projected
                     .outbound_proxy()
@@ -1486,5 +1567,7 @@ async fn proxy_websocket_capacity_is_shared_by_bound_accounts_and_updates_withou
             other.outbound_proxy().unwrap().max_websocket_connections(),
             0
         );
+        assert!(!other.outbound_proxy().unwrap().allow_direct_fallback());
     }
+    database.close().await;
 }

@@ -26,6 +26,7 @@ export function useProxies() {
     name: '',
     proxyUrl: '',
     maxWebsocketConnections: '',
+    allowDirectFallback: false,
     customLocation: false,
     location: {
       country: '',
@@ -60,6 +61,7 @@ export function useProxies() {
     form.maxWebsocketConnections = proxy?.maxWebsocketConnections
       ? String(proxy.maxWebsocketConnections)
       : ''
+    form.allowDirectFallback = proxy?.allowDirectFallback ?? false
     formTestResult.value = null
     const currentLocation = proxy?.autoLocation
       ? proxy.detectedLocation?.location ?? proxy.location
@@ -236,6 +238,7 @@ export function useProxies() {
             name,
             autoLocation: false,
             maxWebsocketConnections,
+            allowDirectFallback: form.allowDirectFallback,
             proxyUrl: proxyUrl || undefined,
             location,
           })
@@ -244,6 +247,7 @@ export function useProxies() {
               name,
               autoLocation: false,
               maxWebsocketConnections,
+              allowDirectFallback: form.allowDirectFallback,
               proxyUrl,
               location,
             },

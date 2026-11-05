@@ -6,6 +6,40 @@ use super::*;
 use crate::credential::CodexSelectionModel;
 use gateway_core::operation::RawJsonPayload;
 
+/// 只改变本次原生模型执行的出口，租约及控制面仍保留账号配置
+pub(super) fn model_request_account<'a>(
+    account: &'a ProviderAccount,
+    context: &AttemptContext,
+) -> std::borrow::Cow<'a, ProviderAccount> {
+    if context.uses_direct_fallback(account.id()) {
+        context.trace().record(
+            "outbound.direct_fallback",
+            json!({
+                "accountId": account.id().as_str(),
+                "proxyEndpoint": account.outbound_proxy().map(|proxy| proxy.endpoint()),
+            }),
+        );
+        std::borrow::Cow::Owned(account.clone().with_outbound_proxy(None))
+    } else {
+        std::borrow::Cow::Borrowed(account)
+    }
+}
+
+pub(super) fn model_connection_budget(
+    account: &ProviderAccount,
+    context: &AttemptContext,
+) -> gateway_core::engine::connection::ConnectionBudget {
+    if account
+        .outbound_proxy()
+        .is_some_and(|proxy| proxy.allow_direct_fallback())
+    {
+        // 为直连保留一次建连和剩余时间，避免失效代理耗尽整段 opening 预算
+        context.connection_budget().clone().reserve_next_opening()
+    } else {
+        context.connection_budget().clone()
+    }
+}
+
 impl CodexProvider {
     pub(super) async fn execute_image(
         self: Arc<Self>,
@@ -341,15 +375,26 @@ impl CodexProvider {
                     true,
                 )
             });
+        let outbound_account = model_request_account(lease.account(), &context);
+        let client = self
+            .client_for_request(&context)?
+            .for_account(&outbound_account)
+            .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
+            .with_responses_api_base_url(lease.authentication().responses_api_base_url())
+            .with_middleware_headers(middleware_headers)
+            .with_outbound_middleware(outbound_middleware)
+            .with_privacy(context.privacy(), context.cancellation().clone());
+        let client = if context.uses_direct_fallback(lease.account_id())
+            || outbound_account
+                .outbound_proxy()
+                .is_some_and(|proxy| proxy.allow_direct_fallback())
+        {
+            client.with_connection_budget(model_connection_budget(&outbound_account, &context))
+        } else {
+            client
+        };
         let events = cold_json_response_stream(ColdJsonResponse {
-            client: self
-                .client_for_request(&context)?
-                .for_account(lease.account())
-                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
-                .with_responses_api_base_url(lease.authentication().responses_api_base_url())
-                .with_middleware_headers(middleware_headers)
-                .with_outbound_middleware(outbound_middleware)
-                .with_privacy(context.privacy(), context.cancellation().clone()),
+            client,
             response_origin: request.response_origin,
             endpoint_path: request.endpoint_path,
             body: request.body,
@@ -664,9 +709,17 @@ pub(super) fn cold_json_response_stream(request: ColdJsonResponse) -> EventStrea
                 error,
             );
         }
+        let direct_fallback = match &response {
+            Err(CodexHandshakeAttemptError::Client(error)) =>
+                direct_fallback_transport(error, &active_account, &request.context),
+            _ => None,
+        };
         let response = match response.map_err(map_handshake_attempt_error) {
             Ok(response) => response,
             Err(mut failure) => {
+                if let Some(transport) = direct_fallback {
+                    failure.error = failure.error.with_direct_fallback(transport);
+                }
                 if let Some(observation) = failure.observation.take() {
                     yield ProviderEvent::observation(observation);
                 }
@@ -853,11 +906,18 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 error,
             );
         }
+        let direct_fallback = match &response {
+            Err(CodexHandshakeAttemptError::Client(error)) =>
+                direct_fallback_transport(error, &active_account, &context),
+            _ => None,
+        };
         let response = response.map_err(map_handshake_attempt_error);
         let response = match response {
             Ok(response) => response,
             Err(mut failure) => {
-                if let Some(policy) = websocket_failure_policy {
+                if let Some(transport) = direct_fallback {
+                    failure.error = failure.error.with_direct_fallback(transport);
+                } else if let Some(policy) = websocket_failure_policy {
                     apply_websocket_recovery_policy(
                         &mut failure,
                         WebSocketRecoveryContext {

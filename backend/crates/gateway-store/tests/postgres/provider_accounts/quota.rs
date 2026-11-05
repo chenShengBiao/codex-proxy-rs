@@ -247,6 +247,7 @@ async fn managed_proxy_changes_clear_snapshots_and_reject_old_connections() {
         proxy = proxies
             .update(
                 UpdateProxy {
+                    allow_direct_fallback: None,
                     id: proxy.id.clone(),
                     revision: proxy.revision,
                     name: proxy.name.clone(),

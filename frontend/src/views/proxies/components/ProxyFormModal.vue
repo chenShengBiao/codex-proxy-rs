@@ -36,6 +36,7 @@ const open = defineModel<boolean>({ required: true })
 const name = defineModel<string>('name', { required: true })
 const proxyUrl = defineModel<string>('proxyUrl', { required: true })
 const maxWebsocketConnections = defineModel<string>('maxWebsocketConnections', { required: true })
+const allowDirectFallback = defineModel<boolean>('allowDirectFallback', { required: true })
 const customLocation = defineModel<boolean>('customLocation', { required: true })
 const location = defineModel<RequestLocation>('location', { required: true })
 const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
@@ -166,6 +167,9 @@ function clearForm() {
       </ZFormItem>
       <ZFormItem prop="maxWebsocketConnections" :label="t('proxies.editor.upstreamWsConnectionCap')" :description="t('proxies.editor.connectionLimitHelp')">
         <ZInput v-model="maxWebsocketConnections" :aria-label="t('proxies.editor.upstreamWsConnectionCap')" :placeholder="t('proxies.editor.noRestrictionsByDefault')" type="number" min="0" max="4294967295" step="1" :disabled="busy" />
+      </ZFormItem>
+      <ZFormItem :description="t('proxies.editor.directFallbackHelp')">
+        <ZSwitch v-model="allowDirectFallback" :label="t('proxies.editor.allowDirectFallback')" :disabled="busy" />
       </ZFormItem>
       <div class="flex items-center justify-between gap-3">
         <ZSwitch v-model="customLocation" :label="t('proxies.editor.customTimeZoneLocation')" :disabled="busy" />

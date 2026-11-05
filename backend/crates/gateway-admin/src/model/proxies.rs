@@ -107,6 +107,7 @@ pub struct NewProxy {
 pub struct UpdateProxy {
     /// 省略保留配置，零值取消限制
     pub max_websocket_connections: Option<u32>,
+    pub allow_direct_fallback: Option<bool>,
     pub enabled: Option<bool>,
     pub auto_location: Option<bool>,
     pub test: Option<ProxyTestResult>,

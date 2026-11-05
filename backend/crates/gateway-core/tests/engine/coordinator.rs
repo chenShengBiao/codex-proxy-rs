@@ -718,6 +718,10 @@ impl ExecutionStore for FakeStore {
 }
 
 enum Script {
+    ExhaustedConnectionStream {
+        account_id: &'static str,
+        items: Vec<Result<GatewayEvent, ProviderError>>,
+    },
     ProtectedStream {
         account_id: &'static str,
         items: Vec<Result<GatewayEvent, ProviderError>>,
@@ -840,10 +844,16 @@ impl Provider for ScriptedProvider {
             .pop_front()
             .expect("one script per provider call");
         let protected = matches!(script, Script::ProtectedStream { .. });
+        if matches!(script, Script::ExhaustedConnectionStream { .. }) {
+            for _ in 0..4 {
+                context.connection_budget().begin().unwrap();
+            }
+        }
         match script {
             Script::Error(error) => Err(error),
             Script::Pending => futures::future::pending().await,
             Script::Stream { account_id, items }
+            | Script::ExhaustedConnectionStream { account_id, items }
             | Script::ProtectedStream { account_id, items } => {
                 let candidate = request.candidate();
                 let metadata = ProviderCallMetadata::new(
@@ -6241,6 +6251,154 @@ fn provider_default_profile_is_applied_once_and_frozen_across_account_retries() 
         "configured-default"
     );
     assert_eq!(contexts[1].request_profile(), Some(first));
+}
+
+#[test]
+fn direct_fallback_pins_the_same_account_and_is_request_local() {
+    let account = ProviderAccountId::new("acct_first").unwrap();
+    let failure = || Script::Stream {
+        account_id: "acct_first",
+        items: vec![Err(ProviderError::new(
+            ProviderErrorKind::Transport,
+            UpstreamSendState::NotSent,
+        )
+        .with_direct_fallback(AttemptTransport::Fallback))],
+    };
+    let success = || Script::Stream {
+        account_id: "acct_first",
+        items: complete_stream(None),
+    };
+    let (coordinator, store, provider) = coordinator(vec![failure(), success(), success()]);
+    for request_index in 0..2 {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        block_on(session.collect_uncommitted()).unwrap();
+        block_on(session.commit_downstream(Some(200))).unwrap();
+        let contexts = provider.contexts.lock().unwrap();
+        assert!(!contexts[0].uses_direct_fallback(&account));
+        assert_eq!(contexts[1].required_account(), Some(&account));
+        assert!(contexts[1].uses_direct_fallback(&account));
+        assert!(!contexts[1].uses_direct_fallback(&ProviderAccountId::new("acct_other").unwrap()));
+        assert_eq!(contexts[1].transport(), AttemptTransport::Fallback);
+        if request_index == 1 {
+            assert!(!contexts[2].uses_direct_fallback(&account));
+        }
+    }
+    assert_eq!(store.state.lock().unwrap().intermediate_failures, 1);
+    assert_eq!(provider.released_leases.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn direct_fallback_cannot_repeat_or_replay_sent_ambiguous_or_prohibited_requests() {
+    for scenario in [
+        "repeat",
+        "sent",
+        "ambiguous",
+        "prohibited",
+        "cancelled",
+        "budget",
+    ] {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let state = match scenario {
+            "sent" => UpstreamSendState::Sent,
+            "ambiguous" => UpstreamSendState::Ambiguous,
+            _ => UpstreamSendState::NotSent,
+        };
+        let failure = || {
+            let mut error = ProviderError::new(ProviderErrorKind::Transport, state)
+                .with_direct_fallback(AttemptTransport::Fallback);
+            if scenario == "prohibited" {
+                error = error.with_retry_prohibited();
+            }
+            if scenario == "budget" {
+                Script::ExhaustedConnectionStream {
+                    account_id: "acct_first",
+                    items: vec![Err(error)],
+                }
+            } else {
+                Script::Stream {
+                    account_id: "acct_first",
+                    items: vec![Err(error)],
+                }
+            }
+        };
+        let (coordinator, _, provider) = coordinator(if scenario == "repeat" {
+            vec![failure(), failure()]
+        } else {
+            vec![failure()]
+        });
+        let cancellation = CancellationToken::new();
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            cancellation.clone(),
+        ))
+        .unwrap();
+        if scenario == "cancelled" {
+            cancellation.cancel();
+        }
+        assert!(
+            block_on(session.collect_uncommitted()).is_err(),
+            "{scenario}"
+        );
+        assert_eq!(
+            provider.contexts.lock().unwrap().len(),
+            match scenario {
+                "repeat" => 2,
+                "cancelled" => 0,
+                _ => 1,
+            },
+            "{scenario}"
+        );
+    }
+}
+
+#[test]
+fn direct_fallback_cannot_lower_the_request_send_watermark() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, _, provider) = coordinator(vec![
+        Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(ProviderError::new(
+                ProviderErrorKind::RateLimited,
+                UpstreamSendState::Sent,
+            )
+            .with_replay_safe())],
+        },
+        Script::Stream {
+            account_id: "acct_second",
+            items: vec![Err(ProviderError::new(
+                ProviderErrorKind::Transport,
+                UpstreamSendState::NotSent,
+            )
+            .with_direct_fallback(AttemptTransport::Fallback))],
+        },
+    ]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    assert!(block_on(session.collect_uncommitted()).is_err());
+    assert_eq!(provider.contexts.lock().unwrap().len(), 2);
 }
 
 #[test]

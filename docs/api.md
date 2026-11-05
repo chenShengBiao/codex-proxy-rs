@@ -1224,8 +1224,8 @@ Search 的选号限制不约束插件在选号后主动改写正文。
 | `GET` | `/api/admin/proxies` | `page`、`pageSize`（1-200）、`search`（名称） | `{ items, page }` |
 | `GET` | `/api/admin/proxies/accounts` | `proxyId`、`page`、`pageSize`（1-200）、`search`（账号名称或邮箱） | `{ items, page }` |
 | `POST` | `/api/admin/proxies/accounts/remove` | `{ proxyId, accountId }` | `{ configRevision }` |
-| `POST` | `/api/admin/proxies/create` | `[{ name, proxyUrl, location?, autoLocation?, maxWebsocketConnections? }]` | 逐项结果数组，成功项的 `data` 为 `{ record, configRevision }` |
-| `POST` | `/api/admin/proxies/update` | `{ id, revision, name, enabled?, proxyUrl?, location?, autoLocation?, maxWebsocketConnections? }` | `{ record, configRevision }` |
+| `POST` | `/api/admin/proxies/create` | `[{ name, proxyUrl, location?, autoLocation?, maxWebsocketConnections?, allowDirectFallback? }]` | 逐项结果数组，成功项的 `data` 为 `{ record, configRevision }` |
+| `POST` | `/api/admin/proxies/update` | `{ id, revision, name, enabled?, proxyUrl?, location?, autoLocation?, maxWebsocketConnections?, allowDirectFallback? }` | `{ record, configRevision }` |
 | `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, detectLocation? }` | 测试未保存的地址或服务器直连出口，返回连通性及可选位置结果，不创建代理 |
 | `POST` | `/api/admin/proxies/test` | `[{ id, revision, detectLocation? }]` | 逐项结果数组，成功项的 `data` 为最新代理记录 |
 | `POST` | `/api/admin/proxies/delete` | `{ id, revision }` | `{ configRevision }` |
@@ -1242,7 +1242,7 @@ Search 的选号限制不约束插件在选号后主动改写正文。
 调用方应按超时预算分组发送，请求中断不会回滚已提交项
 
 `record` 包含 `id`、`name`、`enabled`、`endpoint`、`hasAuthentication`、`revision`、`accountCount`、`location`、
-`autoLocation`、`detectedLocation`、`maxWebsocketConnections`、`lastTestAt`、
+`autoLocation`、`detectedLocation`、`maxWebsocketConnections`、`allowDirectFallback`、`lastTestAt`、
 `lastTest: { success, latencyMs, exitIp, exitIpv4, exitIpv6, message, location }`、`createdAt`、`updatedAt`。
 未测试时 `lastTestAt` / `lastTest` 为 `null`。连通性失败返回 HTTP 200 和 `lastTest.success=false`；
 记录版本过期、重复 URL 或代理正在用于账号导入时对应 409，并发测试满载对应 429；
@@ -1266,6 +1266,11 @@ Search 的选号限制不约束插件在选号后主动改写正文。
 
 更新省略 `proxyUrl` 保留认证；连接配置改变时清除测试结果并更新所有绑定账号。
 测试结果只在请求中的版本仍匹配时保存
+
+`allowDirectFallback` 控制原生 OpenAI/xAI 模型请求的代理失败直连，创建省略为 `false`，更新省略或 `null` 保留原值。
+开启后，仅明确未发送的瞬时建连失败可在同账号切换一次直连，使用服务器出口 IP，并移除代理的位置覆盖。
+已有发送、发送结果未知、上游业务拒绝、证书或 TLS 配置错误，以及已绑定原生续接的请求不触发直连；恢复仍受取消、期限和连接预算限制。
+账号绑定不变，后续请求仍先走代理。额度查询、凭据刷新、代理出口测试、语音会话及插件受管上游不使用此回退
 
 代理默认启用，更新 `enabled: false` 后保留配置、测试结果和账号绑定，关联账号的新请求改为直连，
 不应用该代理的位置覆盖；重新启用后恢复原出口及位置规则。省略 `enabled` 保留当前状态。

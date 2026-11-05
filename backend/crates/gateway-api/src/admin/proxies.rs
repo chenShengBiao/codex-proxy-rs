@@ -53,6 +53,8 @@ struct CreateRequest {
     #[serde(default)]
     max_websocket_connections: u32,
     #[serde(default)]
+    allow_direct_fallback: bool,
+    #[serde(default)]
     auto_location: bool,
     location: Option<gateway_core::account::RequestLocation>,
     name: String,
@@ -63,6 +65,7 @@ struct CreateRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateRequest {
     max_websocket_connections: Option<u32>,
+    allow_direct_fallback: Option<bool>,
     enabled: Option<bool>,
     auto_location: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_location_update")]
@@ -151,6 +154,7 @@ struct ProxyAccountView {
 #[serde(rename_all = "camelCase")]
 struct ProxyView {
     max_websocket_connections: u32,
+    allow_direct_fallback: bool,
     enabled: bool,
     auto_location: bool,
     detected_location: Option<gateway_admin::model::proxies::DetectedProxyLocation>,
@@ -176,6 +180,7 @@ impl From<(ProxyRecord, crate::time::TimePresenter)> for ProxyView {
         Self {
             auto_location: record.auto_location,
             max_websocket_connections: record.proxy.max_websocket_connections(),
+            allow_direct_fallback: record.proxy.allow_direct_fallback(),
             enabled: record.enabled,
             detected_location: record.detected_location,
             location: record.location,
@@ -424,7 +429,9 @@ where
                 test: None,
                 location: request.location,
                 name: request.name,
-                proxy: proxy.with_max_websocket_connections(request.max_websocket_connections),
+                proxy: proxy
+                    .with_max_websocket_connections(request.max_websocket_connections)
+                    .with_allow_direct_fallback(request.allow_direct_fallback),
             })
         })
         .collect();
@@ -486,6 +493,7 @@ where
         .update(
             UpdateProxy {
                 max_websocket_connections: request.max_websocket_connections,
+                allow_direct_fallback: request.allow_direct_fallback,
                 enabled: request.enabled,
                 auto_location: request.auto_location,
                 test: None,

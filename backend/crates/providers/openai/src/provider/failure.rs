@@ -431,6 +431,48 @@ pub(super) fn map_handshake_error(error: CodexClientError) -> MappedProviderFail
     map_client_error(error, UpstreamSendState::Ambiguous, true)
 }
 
+/// 只在真实建连错误仍有类型信息时判断，不能把上游拒绝或 TLS 校验失败当成代理故障
+pub(super) fn direct_fallback_transport(
+    error: &CodexClientError,
+    account: &ProviderAccount,
+    context: &AttemptContext,
+) -> Option<AttemptTransport> {
+    if context.uses_direct_fallback(account.id())
+        || !account
+            .outbound_proxy()
+            .is_some_and(|proxy| proxy.allow_direct_fallback())
+    {
+        return None;
+    }
+    match error {
+        CodexClientError::Http(error) | CodexClientError::HttpJson(error)
+            if transient_http_connect(error) =>
+        {
+            Some(AttemptTransport::Fallback)
+        }
+        CodexClientError::WebSocket(error) => match error.classified() {
+            CodexWebSocketExchangeError::Connect(tungstenite::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::UnexpectedEof
+                        | std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::NetworkUnreachable
+                        | std::io::ErrorKind::HostUnreachable
+                ) =>
+            {
+                Some(AttemptTransport::Default)
+            }
+            CodexWebSocketExchangeError::ConnectTimeout { .. } => Some(AttemptTransport::Default),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WebSocketFailurePolicy {
     Budgeted,
@@ -1711,7 +1753,12 @@ fn transient_http_connect(error: &reqwest::Error) -> bool {
         {
             return false;
         }
-        source = cause.source();
+        // io::Error::source 会跳过包装层，get_ref 保留嵌套的 TLS/InvalidData 类型
+        source = cause
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .map(|inner| inner as &(dyn std::error::Error + 'static))
+            .or_else(|| cause.source());
     }
     true
 }

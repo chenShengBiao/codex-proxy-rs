@@ -112,9 +112,12 @@ watch(search, () => {
               </span>
             </template>
             <template #status="{ row }">
-              <ZTag :type="row.enabled ? 'success' : 'default'">
-                {{ row.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
-              </ZTag>
+              <div class="flex flex-col items-center gap-1">
+                <ZTag :type="row.enabled ? 'success' : 'default'">
+                  {{ row.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
+                </ZTag>
+                <span v-if="row.allowDirectFallback" class="whitespace-nowrap text-z-xs text-z-text-secondary">{{ t('proxies.page.directFallbackAllowed') }}</span>
+              </div>
             </template>
             <template #exitIp="{ row }">
               <div v-if="row.lastTest?.exitIpv4 && row.lastTest?.exitIpv6" class="flex flex-col gap-0.5 font-mono text-z-xs">
@@ -168,6 +171,7 @@ watch(search, () => {
       v-model:name="form.name"
       v-model:proxy-url="form.proxyUrl"
       v-model:max-websocket-connections="form.maxWebsocketConnections"
+      v-model:allow-direct-fallback="form.allowDirectFallback"
       v-model:custom-location="form.customLocation"
       v-model:location="form.location"
       :test-result="formTestResult"

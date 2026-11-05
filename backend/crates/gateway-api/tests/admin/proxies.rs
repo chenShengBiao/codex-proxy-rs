@@ -281,8 +281,9 @@ impl ProxyStore for MemoryProxies {
             if record.proxy.expose_url() != proxy.expose_url() {
                 record.detected_location = None;
             }
-            record.proxy =
-                proxy.with_max_websocket_connections(record.proxy.max_websocket_connections());
+            record.proxy = proxy
+                .with_max_websocket_connections(record.proxy.max_websocket_connections())
+                .with_allow_direct_fallback(record.proxy.allow_direct_fallback());
         }
         if let Some(result) = command.test {
             record.detected_location = record.detected_location_after_test(&result);
@@ -291,6 +292,9 @@ impl ProxyStore for MemoryProxies {
         }
         if let Some(limit) = command.max_websocket_connections {
             record.proxy = record.proxy.clone().with_max_websocket_connections(limit);
+        }
+        if let Some(allow) = command.allow_direct_fallback {
+            record.proxy = record.proxy.clone().with_allow_direct_fallback(allow);
         }
         record.revision = Revision::new(record.revision.get() + 1).unwrap();
         Ok(ProxyMutation {
@@ -799,7 +803,7 @@ async fn auto_location_detects_on_enable_preserves_manual_and_refreshes_only_on_
     fixture.auth.insert_session("valid-session");
     let manual = json!({"country":"US", "region":"California", "city":"Los Angeles", "timezone":"America/Los_Angeles"});
     let (status, created) = request(&fixture, "/api/admin/proxies/create", Some(json!([{
-        "name":"Automatic", "proxyUrl":"http://test-user:private-password@proxy.example:8080", "autoLocation":true, "location":manual
+        "name":"Automatic", "proxyUrl":"http://test-user:private-password@proxy.example:8080", "autoLocation":true, "location":manual, "allowDirectFallback":true
     }])), true).await;
     assert_eq!(status, StatusCode::OK);
     let record = &created["data"][0]["data"]["record"];
@@ -813,7 +817,8 @@ async fn auto_location_detects_on_enable_preserves_manual_and_refreshes_only_on_
         &fixture,
         "/api/admin/proxies/update",
         Some(json!({
-            "id":"proxy_test", "revision":1, "name":"Renamed", "autoLocation":true
+            "id":"proxy_test", "revision":1, "name":"Renamed", "autoLocation":true,
+            "proxyUrl":"http://test-user:private-password@proxy.example:8080", "allowDirectFallback":false
         })),
         true,
     )
@@ -1027,4 +1032,84 @@ async fn proxy_websocket_capacity_round_trips_and_preserves_omitted_updates() {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(result["data"][0]["httpStatus"], 400);
     }
+}
+
+#[tokio::test]
+async fn proxy_direct_fallback_round_trips_preserves_omitted_and_keeps_testing_proxy() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let proxy_url = "http://test-user:private-password@proxy.example:8080";
+    let (status, created) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!([
+            {"name":"Allowed", "proxyUrl":proxy_url, "allowDirectFallback":true},
+            {"name":"Default", "proxyUrl":"http://other.example:8080"}
+        ])),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        created["data"][0]["data"]["record"]["allowDirectFallback"],
+        true
+    );
+    assert_eq!(
+        created["data"][1]["data"]["record"]["allowDirectFallback"],
+        false
+    );
+    for (revision, change, expected) in [
+        (1, None, true),
+        (2, Some(Value::Null), true),
+        (3, Some(json!(false)), false),
+        (4, None, false),
+        (5, Some(json!(true)), true),
+    ] {
+        let mut body = json!({"id":"proxy_test", "revision":revision, "name":"Allowed"});
+        if let Some(change) = change {
+            body["allowDirectFallback"] = change;
+        }
+        // 地址整体提交时也必须保留省略的执行选项
+        if revision == 1 {
+            body["proxyUrl"] = json!(proxy_url);
+        }
+        let (status, updated) =
+            request(&fixture, "/api/admin/proxies/update", Some(body), true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated["data"]["record"]["allowDirectFallback"], expected);
+        assert_eq!(updated["data"]["record"]["hasAuthentication"], true);
+        let (_, listed) = request(&fixture, "/api/admin/proxies", None, true).await;
+        assert_eq!(listed["data"]["items"][0]["allowDirectFallback"], expected);
+        assert_eq!(listed["data"]["items"][1]["allowDirectFallback"], false);
+    }
+    let (status, tested) = request(
+        &fixture,
+        "/api/admin/proxies/test",
+        Some(json!([{"id":"proxy_test", "revision":6}])),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tested["data"][0]["data"]["allowDirectFallback"], true);
+    assert_eq!(
+        tested["data"][0]["data"]["lastTest"]["exitIp"],
+        "203.0.113.2"
+    );
+    let (status, invalid) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!([{"name":"Invalid", "proxyUrl":"http://invalid.example:8080", "allowDirectFallback":"true"}])),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(invalid["data"][0]["httpStatus"], 400);
+    let (status, _) = request(
+        &fixture,
+        "/api/admin/proxies/update",
+        Some(json!({"id":"proxy_test", "revision":6, "name":"Invalid", "allowDirectFallback":"true"})),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
