@@ -1,0 +1,9 @@
+[package]
+name = "cpr-migration-rehearsal"
+version = "0.0.0"
+edition = "2024"
+[dependencies]
+tokio = { version = "=1.52.3", features = ["macros", "rt-multi-thread"] }
+sqlx = { git = "https://github.com/transact-rs/sqlx", rev = "f1e94ec34dd5f11ad6488a3a8ac7988439a3f757", default-features = false, features = ["runtime-tokio", "postgres", "migrate"] }
+[profile.dev]
+debug = 0

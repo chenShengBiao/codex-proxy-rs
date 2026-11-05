@@ -1,20 +1,25 @@
-name: Build CPR proxy direct fallback for server
+name: Build latest CPR with preserved direct fallback
 
 on:
   push:
-    branches: [build/cpr-proxy-fallback-20261105-012254]
+    branches: [build/cpr-latest-main-20261105-020014]
 
 permissions:
   contents: read
 
 jobs:
+  quality:
+    uses: ./.github/workflows/server-quality.yml
+    with:
+      ref: 4914aac0c62ab0911c957dd081c1346232509d38
+      run_frontend: false
   frontend:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: e17ae8be49f9a114dd82b04d3b02bcf6e861a9e7
+          ref: 4914aac0c62ab0911c957dd081c1346232509d38
           persist-credentials: false
       - uses: ./.github/actions/build-frontend
         with:
@@ -25,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: e17ae8be49f9a114dd82b04d3b02bcf6e861a9e7
+          ref: 4914aac0c62ab0911c957dd081c1346232509d38
           persist-credentials: false
       - name: Validate and build Linux x86_64
         shell: bash
@@ -35,8 +40,8 @@ jobs:
           docker run --rm --platform linux/amd64 \
             -v "$PWD:/workspace" -w /workspace \
             -e RUST_MIN_STACK=16777216 -e CARGO_BUILD_JOBS=3 \
-            -e CPR_VERSION=3.39.1+proxy-fallback.e17ae8b \
-            -e CPR_GIT_SHA=e17ae8be49f9a114dd82b04d3b02bcf6e861a9e7 \
+            -e CPR_VERSION=3.40.0+proxy-fallback.4914aac \
+            -e CPR_GIT_SHA=4914aac0c62ab0911c957dd081c1346232509d38 \
             -e CPR_BUILD_TYPE=source \
             -e CPR_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             rust:1.99.1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b \
@@ -57,3 +62,24 @@ jobs:
           path: dist/server
           if-no-files-found: error
           retention-days: 7
+
+  migration-rehearsal:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 4914aac0c62ab0911c957dd081c1346232509d38
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.99.1
+      - name: Rehearse SQLx upgrade, rollback and re-upgrade on PostgreSQL 18
+        env:
+          SOURCE_DIR: ${{ github.workspace }}/source
+        run: python3 runner/.github/server-rehearsal/rehearse.py
