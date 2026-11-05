@@ -327,7 +327,7 @@ impl ProxiesService for DefaultProxiesService {
             }
             let proxy = command.proxy.as_ref().unwrap_or(&current.proxy);
             if command.auto_location.unwrap_or(current.auto_location)
-                && (!current.auto_location || proxy != &current.proxy)
+                && (!current.auto_location || proxy.expose_url() != current.proxy.expose_url())
             {
                 command.test = Some(self.probe(Some(proxy), true).await?);
             }

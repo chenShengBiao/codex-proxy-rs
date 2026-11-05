@@ -124,7 +124,9 @@
       "testAfterAdding": "Test after adding",
       "add": "Add ({count})",
       "addProxy": "Add proxy",
-      "stopHelp": "Stopping lets the current operation finish"
+      "stopHelp": "Stopping lets the current operation finish",
+      "allowDirectFallback": "Allow direct connections when the proxy connection fails",
+      "directFallbackHelp": "Only model requests may use the server’s egress IP directly, quota checks and login refreshes still use the proxy"
     },
     "region": {
       "connectionFailed": "Connection failed",
@@ -160,7 +162,8 @@
       "disable": "Disable “{name}”?",
       "disableDescription": "New requests from linked accounts will use direct connections, proxy settings and bindings are kept and resume when reenabled",
       "delete": "Delete “{name}”?",
-      "deleteDescription": "Linked accounts will be unlinked and new requests will use direct connections"
+      "deleteDescription": "Linked accounts will be unlinked and new requests will use direct connections",
+      "directFallbackAllowed": "Direct fallback"
     },
     "assignment": {
       "title": "Assign accounts",

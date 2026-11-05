@@ -7,6 +7,9 @@ fn proxy_endpoints_support_explicit_schemes_and_redact_credentials() {
     for scheme in ["http", "https", "socks5", "socks5h"] {
         let proxy =
             OutboundProxy::parse(&format!("{scheme}://user:p%40ss%3Aword@[::1]:1080")).unwrap();
+        assert!(!proxy.allow_direct_fallback());
+        let proxy = proxy.with_allow_direct_fallback(true);
+        assert!(proxy.allow_direct_fallback());
         assert!(proxy.expose_url().contains("p%40ss%3Aword"));
         assert!(!proxy.endpoint().contains("user"));
         assert!(!proxy.endpoint().contains("p%40ss"));

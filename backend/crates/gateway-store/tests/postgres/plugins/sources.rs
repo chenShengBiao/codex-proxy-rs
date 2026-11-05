@@ -291,6 +291,7 @@ async fn source_proxy_is_revision_fenced_and_referenced_until_the_artifact_is_de
     let updated = proxies
         .update(
             UpdateProxy {
+                allow_direct_fallback: None,
                 max_websocket_connections: None,
                 enabled: None,
                 auto_location: None,

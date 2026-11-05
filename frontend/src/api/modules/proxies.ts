@@ -23,6 +23,7 @@ export interface OutboundProxyTest {
 
 export interface OutboundProxyRecord {
   maxWebsocketConnections: number
+  allowDirectFallback: boolean
   enabled: boolean
   autoLocation: boolean
   detectedLocation: DetectedProxyLocation | null
@@ -84,6 +85,7 @@ interface ProxyCreateParam {
   name: string
   proxyUrl: string
   maxWebsocketConnections?: number
+  allowDirectFallback?: boolean
   autoLocation?: boolean
   location?: RequestLocation | null
 }
@@ -97,6 +99,7 @@ interface ProxyUpdateParam extends ProxyIdParam {
   name: string
   enabled?: boolean
   maxWebsocketConnections?: number
+  allowDirectFallback?: boolean
   proxyUrl?: string
   autoLocation?: boolean
   location?: RequestLocation | null

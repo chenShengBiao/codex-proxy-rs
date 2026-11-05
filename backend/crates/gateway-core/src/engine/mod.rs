@@ -125,6 +125,7 @@ impl AttemptTrigger {
 #[derive(Debug, Clone, Default)]
 pub struct AccountAttemptContext {
     excluded_accounts: BTreeSet<ProviderAccountId>,
+    direct_fallback_accounts: BTreeSet<ProviderAccountId>,
     required_account: Option<ProviderAccountId>,
     state_owner: Option<ProviderAccountStateOwner>,
     credential_recovery_attempted: bool,
@@ -141,6 +142,7 @@ impl AccountAttemptContext {
     ) -> Self {
         Self {
             excluded_accounts,
+            direct_fallback_accounts: BTreeSet::new(),
             required_account,
             state_owner,
             credential_recovery_attempted: false,
@@ -161,6 +163,7 @@ impl AccountAttemptContext {
         let (required_account, eligibility) = target.into_selection();
         Self {
             excluded_accounts,
+            direct_fallback_accounts: BTreeSet::new(),
             required_account: Some(required_account),
             state_owner,
             credential_recovery_attempted: false,
@@ -189,6 +192,13 @@ impl AccountAttemptContext {
     #[must_use]
     pub const fn excluded_accounts(&self) -> &BTreeSet<ProviderAccountId> {
         &self.excluded_accounts
+    }
+
+    /// 仅当前请求已由 Core 批准切换的账号使用直连
+    #[must_use]
+    pub fn with_direct_fallback_accounts(mut self, accounts: BTreeSet<ProviderAccountId>) -> Self {
+        self.direct_fallback_accounts = accounts;
+        self
     }
 
     #[must_use]
@@ -556,6 +566,11 @@ pub struct AttemptContext {
 }
 
 impl AttemptContext {
+    #[must_use]
+    pub fn uses_direct_fallback(&self, account: &ProviderAccountId) -> bool {
+        self.account.direct_fallback_accounts.contains(account)
+    }
+
     #[must_use]
     pub const fn request_body_limit(&self) -> Option<usize> {
         self.request.request_body_limit

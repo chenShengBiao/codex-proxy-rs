@@ -124,7 +124,9 @@
       "testAfterAdding": "添加後測試",
       "add": "添加 {count} 條",
       "addProxy": "添加代理",
-      "stopHelp": "停止後仍會完成當前操作"
+      "stopHelp": "停止後仍會完成當前操作",
+      "allowDirectFallback": "代理連線失敗時允許直連",
+      "directFallbackHelp": "僅模型請求可使用伺服器出口 IP 直連，額度查詢和登入更新仍使用代理"
     },
     "region": {
       "connectionFailed": "連接失敗",
@@ -160,7 +162,8 @@
       "disable": "確定禁用“{name}”嗎？",
       "disableDescription": "關聯賬號的新請求將改爲直連，代理配置和綁定會保留，重新啓用後恢復使用",
       "delete": "確定刪除“{name}”嗎？",
-      "deleteDescription": "將自動解除關聯賬號，關聯賬號的新請求將改爲直連"
+      "deleteDescription": "將自動解除關聯賬號，關聯賬號的新請求將改爲直連",
+      "directFallbackAllowed": "可回退直連"
     },
     "assignment": {
       "title": "分配賬號",
